@@ -217,6 +217,8 @@ function relay_irc_to_ws(irc_client, msg){
 	
 	var split_msg = msg.split(' ');
 	
+	console.log('got irc msg ' + split_msg[0]);
+
 	if(!client){
 		
 		if(split_msg.length < 2 || split_msg[0] != 'PASS'){
@@ -332,7 +334,6 @@ var irc_server = net.createServer(function(client){
 		lines.forEach(function(l){
 			if(l.length == 0) return;
 			
-			console.log('got irc msg: ' + l);
 			relay_irc_to_ws(client, l);
 		});
 	});
