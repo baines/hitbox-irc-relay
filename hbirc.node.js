@@ -27,7 +27,7 @@ function get_chat_server(callback){
 	var servers = [];
 	
 	hbapi_get_json('https://api.hitbox.tv/chat/servers', function(obj){
-		obj.map(function(i){
+		obj.forEach(function(i){
 			servers.push(i['server_ip']);
 		});
 		
@@ -81,7 +81,7 @@ function get_auth_token(user, pass, callback){
 	req.end();
 }
 
-var clients = [];
+var clients = {};
 
 function init_websocket(client){
 
@@ -122,12 +122,12 @@ function irc_msg(client, msg){
 	client.irc.write(':hitbox-irc ' + msg + '\r\n');
 }
 
-function irc_usr_msg(client, msg){
+function irc_usr_msg(client, usr, msg){
 	console.log('sending irc usr msg: ' + msg);
-	client.irc.write(':' + client.user + '!' + client.user + '@hitbox-irc ' + msg + '\r\n');
+	client.irc.write(':' + usr + '!' + usr + '@hitbox-irc ' + msg + '\r\n');
 }
 
-var last_sent_msg = null;
+var pending_msgs = {};
 
 function relay_ws_to_irc(client, msg){
 	console.log(msg);
@@ -165,7 +165,7 @@ function relay_ws_to_irc(client, msg){
 				};
 			
 				ws_msg(client, '5:::' + JSON.stringify(get_names_obj));
-				irc_usr_msg(client, 'JOIN :#' + cmd.params.channel);
+				irc_usr_msg(client, client.user, 'JOIN :#' + cmd.params.channel);
 			}
 		
 			if(cmd.method == 'userList'){
@@ -184,24 +184,34 @@ function relay_ws_to_irc(client, msg){
 				names.trim();
 				
 				irc_msg(client, names);
-				irc_msg(client, '366 #' + cmd.params.channel + ' :End of NAMES list');
+				irc_msg(client, '366 ' + client.user + ' #' + cmd.params.channel + ' :End of NAMES list');
 			}
 			
 			if(cmd.method == 'chatMsg'){
 				// don't echo our own msgs
-				if(cmd.params.name == client.user && cmd.params.text == last_sent_msg) return;
+				if(cmd.params.name == client.user && cmd.params.text in pending_msgs){
+					delete pending_msgs[cmd.params.text];
+					return;
+				}
 				
-				
-				client.irc.write(
-					':' +
-					cmd.params.name +
-					'!' +
-					cmd.params.name +
-					'@hitbox-irc PRIVMSG #' +
+				irc_usr_msg(
+					client,
+					cmd.params.name,
+					'PRIVMSG #' +
 					cmd.params.channel +
 					' :' +
-					cmd.params.text +
-					'\r\n'
+					cmd.params.text
+				);
+			}
+			
+			if(cmd.method == 'motdMsg'){
+				irc_usr_msg(
+					client,
+					cmd.params.name,
+					'TOPIC #' +
+					cmd.params.channel +
+					' :' +
+					cmd.params.text
 				);
 			}
 
@@ -211,9 +221,10 @@ function relay_ws_to_irc(client, msg){
 
 function relay_irc_to_ws(irc_client, msg){
 
-	var client = clients.filter(function(c){
-		return c.irc == irc_client;
-	})[0];
+	var client = null;
+	if(irc_client in clients){
+		client = clients[irc_client];
+	}
 	
 	var split_msg = msg.split(' ');
 	
@@ -231,13 +242,13 @@ function relay_irc_to_ws(irc_client, msg){
 			irc_msg(tmp, 'ERROR you :Bad password');
 			irc_client.destroy();
 		} else {	
-			clients.push({
+			clients[irc_client] = {
 				irc:   irc_client,
 				ws:    null,
 				user:  null,
 				pass:  split_msg[1],
 				token: null
-			});
+			};
 		}
 		
 	} else if(client.ws == null && client.user == null){
@@ -317,8 +328,28 @@ function relay_irc_to_ws(irc_client, msg){
 			};
 			
 			ws_msg(client, '5:::' + JSON.stringify(msg_obj));
+			pending_msgs[txt] = true;
+		}
+		
+		if(split_msg[0] == 'TOPIC'){
+		
+			var chan = split_msg[1].substr(1);
+			var motd = split_msg.slice(2).join(' ').substr(1);
+		
+			var motd_obj = {
+				name: 'message',
+				args: [ {
+					method: 'motdMsg',
+					params: {
+						channel: chan,
+						name: client.user,
+						nameColor: '86BD25',
+						text: motd
+					}
+				} ]
+			};
 			
-			last_sent_msg = txt;
+			ws_msg(client, '5:::' + JSON.stringify(motd_obj));
 		}
 	}
 }
@@ -327,6 +358,9 @@ var irc_server = net.createServer(function(client){
 
 	client.on('end', function(){
 		console.log('client dcd');
+		if(client in clients){
+			delete clients[client];
+		}
 	});
 	
 	client.on('data', function(data){		
