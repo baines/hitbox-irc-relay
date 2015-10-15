@@ -218,23 +218,40 @@ function relay_ws_to_irc(client, msg){
 			}
 			
 			if(cmd.method == 'infoMsg'){
-				var notice = null;
 				
 				if(cmd.params.action == 'ban'){
-					notice = ' was banned from the channel.';
-				}
-				if(cmd.params.action == 'kickUser'){
-					notice = ' was kicked from the channel.';
+					irc_usr_msg(
+						client,
+						'someone',
+						'MODE #' +
+						cmd.params.channel +
+						' +b *!' +
+						cmd.params.name +
+						'@hitbox-irc'
+					);
 				}
 				
-				if(notice && cmd.params.name && cmd.params.channel){
-					irc_msg(
+				if(cmd.params.action == 'unban'){
+					irc_usr_msg(
 						client,
-						'NOTICE #' +
+						'someone',
+						'MODE #' +
 						cmd.params.channel +
-						' :' +
+						' -b *!' +
 						cmd.params.name +
-						notice
+						'@hitbox-irc'
+					);
+				}
+				
+				if(cmd.params.action == 'kicked'){
+					irc_usr_msg(
+						client,
+						'someone',
+						'KICK #' +
+						cmd.params.channel +
+						' ' +
+						cmd.params.variables.user +
+						' :'
 					);
 				}
 			}
@@ -385,6 +402,36 @@ function relay_irc_to_ws(irc_client, msg){
 			};
 			
 			ws_msg(client, '5:::' + JSON.stringify(motd_obj));
+		}
+		
+		if(split_msg[0] == 'KICK'){
+			var chan = split_msg[1].substr(1);
+			var usr  = split_msg[2];
+			var time = split_msg[3];
+			
+			if(chan in client.channels){
+			
+				var kick_obj = {
+					name: 'message',
+					args: [ {
+						method: 'kickUser',
+						params: {
+							channel: chan,
+							name: usr,
+							token: client.token,
+							timeout: time ? parseInt(time.substr(1)) : 10
+						}
+					} ]
+				};
+			
+				ws_msg(client, '5:::' + JSON.stringify(kick_obj));
+			}
+		}
+		
+		if(split_msg[0] == 'MODE'){
+			if(split_msg[1] == '+b'){
+				//TODO: compare mask with users and ban?
+			}
 		}
 	}
 }
