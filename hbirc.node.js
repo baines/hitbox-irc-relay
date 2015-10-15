@@ -163,6 +163,8 @@ function relay_ws_to_irc(client, msg){
 						}
 					} ]
 				};
+				
+				client.channels[cmd.params.channel] = true;
 			
 				ws_msg(client, '5:::' + JSON.stringify(get_names_obj));
 				irc_usr_msg(client, client.user, 'JOIN :#' + cmd.params.channel);
@@ -214,6 +216,38 @@ function relay_ws_to_irc(client, msg){
 					cmd.params.text
 				);
 			}
+			
+			if(cmd.method == 'infoMsg'){
+				var notice = null;
+				
+				if(cmd.params.action == 'ban'){
+					notice = ' was banned from the channel.';
+				}
+				if(cmd.params.action == 'kickUser'){
+					notice = ' was kicked from the channel.';
+				}
+				
+				if(notice && cmd.params.name && cmd.params.channel){
+					irc_msg(
+						client,
+						'NOTICE #' +
+						cmd.params.channel +
+						' :' +
+						cmd.params.name +
+						notice
+					);
+				}
+			}
+			
+			if(cmd.method == 'slowMsg'){
+				irc_msg(
+					client,
+					'NOTICE #' +
+					cmd.params.channel +
+					' :' +
+					cmd.params.text
+				);
+			}
 
 		});
 	}
@@ -247,7 +281,8 @@ function relay_irc_to_ws(irc_client, msg){
 				ws:    null,
 				user:  null,
 				pass:  split_msg[1],
-				token: null
+				token: null,
+				channels: {}
 			};
 		}
 		
@@ -359,6 +394,21 @@ var irc_server = net.createServer(function(client){
 	client.on('end', function(){
 		console.log('client dcd');
 		if(client in clients){
+			if(clients[client].ws && clients[client].user){
+				var logout_obj = {
+					name: 'message',
+					args: [ {
+						method: 'partChannel',
+						params: {
+							name: clients[client].user
+						}
+					} ]
+				};
+			
+				ws_msg(clients[client], '5:::' + JSON.stringify(logout_obj));
+				clients[client].ws.close();
+			}
+		
 			delete clients[client];
 		}
 	});
